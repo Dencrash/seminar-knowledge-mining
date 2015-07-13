@@ -1,8 +1,12 @@
 import os, shutil
 import numpy as np
 import matplotlib.pyplot as plt
+from rdflib import Graph, URIRef, BNode, Literal
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+from sklearn.lda import LDA
+from sklearn.tree import DecisionTreeClassifier
 from sklearn.metrics import f1_score, classification_report
 from sklearn.metrics import confusion_matrix
 from helper.download import ensure_directory
@@ -52,8 +56,50 @@ def train_and_predict(classifier, dataset, split, log=True):
     classifier.fit(training.data, training.target)
     # Use model to make predictions
     predicted = classifier.predict(testing.data)
+    probabilities = classifier.predict_proba(testing.data)
     prediction = Prediction(testing.target, predicted, testing.classes)
+    for index, uri in enumerate(testing.uris):
+        subject = URIRef('http://commons.dbpedia.org/resource/File:' + uri.replace('http://commons.wikimedia.org/wiki/Special:FilePath/', ''))
+        for classIndex, probability in enumerate(probabilities[index]):
+            probability = round(probability * 100) / 100
+            g1.add((subject, URIRef('http://commons.dbpedia.org/property/HpiCategory' + testing.classes[classIndex]), Literal(probability)))
+            g3bNode = BNode()
+            g3.add((g3bNode, URIRef('http://commons.dbpedia.org/property/HpiType'), URIRef('http://commons.dbpedia.org/resource/Hpi' + testing.classes[classIndex])))
+            g3.add((g3bNode, URIRef('http://commons.dbpedia.org/property/HpiProbability'), Literal(probability)))
+            if classIndex == (predicted[index]):
+                g3.add((subject, URIRef('http://commons.dbpedia.org/property/HpiPrediction'), g3bNode))
+                g1.add((subject, URIRef('http://commons.dbpedua.org/property/HpiTopPrediction'), URIRef('http://commons.dbpedia.org/resource/Hpi' + testing.classes[classIndex])))
+                g2.add((subject, URIRef('http://commons.dbpedua.org/property/HpiTopPrediction'), URIRef('http://commons.dbpedia.org/resource/Hpi' + testing.classes[classIndex])))
+            else:
+                g3.add((subject, URIRef('http://commons.dbpedia.org/property/HpiCategory'), g3bNode))
+            if probability > 0.4:
+                g2.add((subject, URIRef('http://commons.dbpedia.org/property/HpiThreshold' + str(0.4)), URIRef('http://commons.dbpedia.org/resource/Hpi' + testing.classes[classIndex])))
+            elif probability > 0.3:
+                g2.add((subject, URIRef('http://commons.dbpedia.org/property/HpiThreshold' + str(0.3)), URIRef('http://commons.dbpedia.org/resource/Hpi' + testing.classes[classIndex])))
+            elif probability > 0.2:
+                g2.add((subject, URIRef('http://commons.dbpedia.org/property/HpiThreshold' + str(0.2)), URIRef('http://commons.dbpedia.org/resource/Hpi' + testing.classes[classIndex])))
+            elif probability > 0.1:
+                g2.add((subject, URIRef('http://commons.dbpedia.org/property/HpiThreshold' + str(0.1)), URIRef('http://commons.dbpedia.org/resource/Hpi' + testing.classes[classIndex])))
+            else:
+                g2.add((subject, URIRef('http://commons.dbpedia.org/property/HpiThresholdBelow' + str(0.1) ), URIRef('http://commons.dbpedia.org/resource/Hpi' + testing.classes[classIndex])))
     return prediction
+
+def train_and_predict_Multi_Classifiers(classifiers, end_classifier, dataset, split, log=True):
+    training, testing = dataset.split(split, log)
+    means, stds = training.normalize()
+    testing.normalize(means, stds)
+    classifiers[0].fit(training.data, training.target)
+    probabilities = classifiers[0].predict_proba(training.data)
+    predictions = classifiers[0].predict_proba(testing.data)
+    for classifier in classifiers:
+        classifier.fit(training.data, training.target)
+        probabilities = np.hstack((probabilities, classifier.predict_proba(training.data)))
+        predictions = np.hstack((predictions, classifier.predict_proba(testing.data)))
+    end_classifier.fit(probabilities, training.target)
+    pred = end_classifier.predict(predictions)
+    predicted = Prediction(testing.target, pred, testing.classes)
+    return predicted
+
 
 def evaluate_classifier(dataset, classifier, iterations, split):
     scores = []
@@ -88,9 +134,22 @@ if __name__ == '__main__':
         args.copy_predicted = args.copy_predicted.replace('<folder>', folder)
 
     dataset = Dataset()
+    g1 = Graph()
+    g2 = Graph()
+    g3 = Graph()
     dataset.load(args.features)
+    classifierList = []
 
-    classifier = RandomForestClassifier(n_estimators=300)
+    classifierList += [RandomForestClassifier(n_estimators=300)]
+    classifierList += [SVC(kernel='linear', probability=True)]
+    classifierList += [DecisionTreeClassifier()]
+    DTreeClassifier = LDA()
+    classifier = SVC(kernel='linear', probability=True) # RandomForestClassifier(n_estimators=300)
+
     prediction = train_and_predict(classifier, dataset, args.split)
+    #prediction = train_and_predict_Multi_Classifiers(classifierList, DTreeClassifier, dataset, args.split)
     prediction.print_scores()
     prediction.plot_confusion_matrix()
+    g1.serialize(destination='data/exampleGraph1', format='n3')
+    g2.serialize(destination='data/exampleGraph2', format='n3')
+    g3.serialize(destination='data/exampleGraph3', format='n3')

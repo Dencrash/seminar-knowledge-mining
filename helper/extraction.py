@@ -24,7 +24,7 @@ def get_extractors(visual, textual):
             ColorFeature,
             HistogramFeature,
             GradientFeature,
-            # BlobFeature,
+            #BlobFeature,
             # BriefFeature,
         ]
     if textual:
@@ -40,7 +40,7 @@ def feature_vector(filename, visual=True, textual=True):
     inputs = get_inputs(filename, visual, textual)
     extractors = get_extractors(visual, textual)
     features = apply_extractors(inputs, extractors)
-    return list(features)
+    return (list(features), inputs['url'])
 
 def feature_names(visual, textual):
     names = []

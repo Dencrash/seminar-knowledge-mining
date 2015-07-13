@@ -7,30 +7,33 @@ from sklearn.cross_validation import train_test_split
 from sklearn.preprocessing import StandardScaler
 from helper.extraction import feature_vector, feature_names
 from helper.image import is_supported, UnsupportedImageError, ImageLoadingError
-from helper.extraction import FeatureExtractionError
+from helper.extraction import FeatureExtractionError, get_metadata
 from helper.text import print_headline
 
 
 class Dataset:
 
-    def __init__(self, data=None, target=None, classes=None, features=None, filenames=None):
+    def __init__(self, data=None, target=None, classes=None, features=None, filenames=None, uris=None):
         self.data = data
         self.target = target
         self.classes = classes
         self.features = features
         self.filenames = filenames
+        self.uris = uris
 
     def read(self, root, visual=True, textual=True):
         data = []
         target = []
         self.classes = []
+        self.uris = []
         self.filenames = []
         for directory in self._walk_directories(root):
             new_class = len(self.classes)
             directory_path = os.path.join(root, directory)
-            for filename, features in self._read_features(directory_path, visual, textual):
+            for filename, features, uri in self._read_features(directory_path, visual, textual):
                 self.filenames.append(filename)
                 data.append(features)
+                self.uris.append(uri)
                 target.append(new_class)
             self.classes.append(directory)
         self.data = np.array(data)
@@ -47,6 +50,7 @@ class Dataset:
             self.classes = content['classes']
             self.features = content['features']
             self.filenames = content['filenames']
+            self.uris = content['uris']
         self._assert_length()
         print('Done (' + str(len(self.target)) + ')')
 
@@ -58,6 +62,7 @@ class Dataset:
         content['classes'] = self.classes
         content['features'] = self.features
         content['filenames'] = self.filenames
+        content['uris'] = self.uris
         with open(filename, 'w') as file_:
             json.dump(content, file_)
         print('Done')
@@ -67,15 +72,15 @@ class Dataset:
         Return two new Dataset instances containing the training data and
         testing data. Filenames are not stored in the new instances.
         """
-        splitted = train_test_split(self.data, self.target, test_size=split)
-        train_data, test_data, train_target, test_target = splitted
+        splitted = train_test_split(self.data, self.target, self.uris, test_size=split)
+        train_data, test_data, train_target, test_target, train_uris, test_uris = splitted
         if log:
             print_headline('Dataset Split')
             print('Training set size', train_target.shape[0])
             print('Test set size', test_target.shape[0])
             print('Feature vector length', train_data.shape[1])
-        training = Dataset(train_data, train_target, self.classes, self.features)
-        testing = Dataset(test_data, test_target, self.classes, self.features)
+        training = Dataset(train_data, train_target, self.classes, self.features, train_uris)
+        testing = Dataset(test_data, test_target, self.classes, self.features, uris = test_uris)
         return training, testing
 
     def normalize(self, means=None, stds=None):
@@ -101,10 +106,10 @@ class Dataset:
             try:
                 # Display progress
                 print('Process {: <62}'.format(filename), flush=True, end='\r')
-                features = feature_vector(os.path.join(directory, filename), visual, textual)
+                features, uri = feature_vector(os.path.join(directory, filename), visual, textual)
                 assert len(features) == len(self.features)
                 count += 1
-                yield filename, features
+                yield filename, features, uri
             except KeyboardInterrupt:
                 sys.exit(1)
             except UnsupportedImageError:
